@@ -1,88 +1,133 @@
 #include <math.h>
-#include <string.h> 
-#include <dht.h>
-#include <wire.h>
+#include <string.h>
+#include "DHT.h"
+#include <Servo.h>
 #include <SoftwareSerial.h>
 #include <Adafruit_BMP280.h>
 
-int Tx = 2;       // connect BT module TX to 2
-int Rx = 3;       // connect BT module RX to 3
-int soilSensorPin = A1; 
-int waterSensorPin = A2; 
-int soilSensorValue;  
+#define DHTPIN 2
+#define DHTTYPE DHT11
+#define waterSensorPower 7
+#define waterSensorPin A0
+#define soilSensorPin A3
+#define servoPin 5
+#define Tx 2
+#define Rx 3
 
-#define dht_apin A0
-#define sensorPower 7
-dht DHT;
-Adafruit_BMP280 bmp; 
-
+Servo myservo;
+Adafruit_BMP280 bmp;
+DHT dht(DHTPIN, DHTTYPE);
 SoftwareSerial bluetooth(Tx, Rx);
 
-void setup() { 
-    Serial.begin(9600); 
-    bluetooth.begin(9600);
-    delay(500);
-    Serial.println("DHT11 Humidity & temperature Sensor\n\n");
-    delay(1000);
+void setup()
+{
 
-    bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,     /* Operating Mode. */
+  myservo.attach(9);
+
+  pinMode(waterSensorPower, OUTPUT);
+  digitalWrite(waterSensorPower, LOW);
+
+  pinMode(soilSensorPower, OUTPUT);
+
+  Serial.begin(9600);
+  bluetooth.begin(9600);
+
+  bmp.begin(0x76);
+  bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,     /* Operating Mode. */
                   Adafruit_BMP280::SAMPLING_X2,     /* Temp. oversampling */
                   Adafruit_BMP280::SAMPLING_X16,    /* Pressure oversampling */
                   Adafruit_BMP280::FILTER_X16,      /* Filtering. */
                   Adafruit_BMP280::STANDBY_MS_500); /* Standby time. */
 
-} 
-
-int readSensor() {
-	digitalWrite(sensorPower, HIGH);	// Turn the sensor ON
-	delay(10);							// wait 10 milliseconds
-	val = analogRead(sensorPin);		// Read the analog value form sensor
-	digitalWrite(sensorPower, LOW);		// Turn the sensor OFF
-	return val;							// send current reading
+  dht.begin();
 }
 
-void loop() { 
-    DHT.read11(dht_apin);
-    soilSensorValue = analogRead(soilSensorPin);
-    int level = readSensor();
-    Serial.print(DHT.humidity);
-    Serial.print(DHT.temperature); 
-    Serial.print(bmp.readPressure()/100);
-    Serial.print(bmp.readTemperature());
-    Serial.print(level);
-    
-    if (sensorValue<limit) {
-      Serial.print("Soil is moist");
-    }
-    else {
-      Serial.print("Soil is not moist");
-    }
-    
-    if (bluetooth.available()) {
-      
-      value = bluetooth.read();
-     
-      if (value =='0') {
-        digitalWrite(blueLED, HIGH);
-        bluetooth.println("Rain not expected");
-      }
-      
-      if (value =='2') {
-        digitalWrite(blueLED, LOW);
-        bluetooth.println("Rain Expected");
-      }
-      
-      if (value =='3') {
-        digitalWrite(redLED, HIGH);
-        bluetooth.println("Red LED on");
-      }
-      
-      if (value =='4') {
-        digitalWrite(redLED, LOW);
-        bluetooth.println("Red LED off");
-      }
-    }
+int readWaterLevel()
+{
+  digitalWrite(waterSensorPower, HIGH);
+  delay(10);
+  int val = analogRead(waterSensorPin);
+  digitalWrite(waterSensorPower, LOW);
+  return val;
+}
 
-    delay(5000);  
+int readSoilWetness()
+{
+  delay(10);
+  int val = analogRead(soilSensorPin);
+  return val;
+}
 
+void loop()
+{
+  delay(5000);
+
+  if (bluetooth.available())
+  {
+    int value = bluetooth.read();
+    bluetooth.println("Read value %d", value);
+  }
+
+  String command;
+  command = Serial.readStringUntil('\n');
+  command.trim();
+
+  bool wet, rain;
+  int level = readWaterLevel();
+
+  if (command == "rain")
+    rain = true;
+  else
+    rain = false;
+
+  if (level > 50)
+  {
+    prevWet = wet;
+    wet = true;
+  }
+  else
+  {
+    prevWet = wet;
+    wet = false;
+  }
+
+  if (wet ^ prevWet)
+  {
+    if (prevWet && rain)
+    {
+      for (pos = 0; pos <= 180; pos += 1)
+      {
+        myservo.write(pos);
+        delay(15);
+      }
+    }
+    else
+    {
+      for (pos = 180; pos >= 0; pos -= 1)
+      {
+        myservo.write(pos);
+        delay(15);
+      }
+    }
+  }
+
+  Serial.print("Soil Wet: ");
+  Serial.println(level);
+
+  float h = dht.readHumidity();
+  float t = dht.readTemperature();
+
+  if (isnan(h) || isnan(t))
+  {
+    Serial.println(F("Failed to read from DHT sensor!"));
+    return;
+  }
+
+  Serial.print(t);
+  Serial.print(" ");
+  Serial.print(bmp.readPressure() / 100);
+  Serial.print(" ");
+  Serial.print(h);
+  Serial.print(" ");
+  Serial.println(level);
 }
